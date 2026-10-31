@@ -17,6 +17,7 @@ from . import library
 from . import scheduler
 from . import weather
 from . import progress
+from . import playback
 from .kodiutil import _
 
 
@@ -109,6 +110,7 @@ class TVWindow(xbmcgui.WindowXML):
         self.guide_pending = False
         self.away_since = 0
         self.our_files = set()
+        self.requested_path = ""
 
     # ----------------------------------------------------------- lifecycle
     def onInit(self):
@@ -145,10 +147,19 @@ class TVWindow(xbmcgui.WindowXML):
 
     def playing_ours(self):
         """True if Kodi's player is currently playing something CableBox started."""
+        return self.playing_source() is not None
+
+    def playing_source(self):
+        """Return the library path, never the resolved URL containing auth data."""
         try:
-            return self.player.isPlaying() and self.player.getPlayingFile() in self.our_files
+            if not self.player.isPlaying():
+                return None
+            path = self.player.getPlayingFile()
+            if path in self.our_files:
+                return path
+            return playback.source_for_stream(self.requested_path, path)
         except Exception:
-            return False
+            return None
 
     def shutdown(self):
         if self.closing:
@@ -423,10 +434,11 @@ class TVWindow(xbmcgui.WindowXML):
             li.setProperty("StartOffset", "%.2f" % offset)
         self.play_token += 1
         self.play_started_at = time.time()
+        self.requested_path = e["p"]
         self.our_files.add(e["p"])
         if e.get("k") in ("show", "clip"):
             self.progress.remember(e["p"])
-        self.player.play(e["p"], li, True)
+        self.player.play(playback.with_offset(e["p"], offset), li, True)
 
     def watchdog(self, e, key, now):
         """Detect files that never started or ended early."""
@@ -565,19 +577,19 @@ class TVWindow(xbmcgui.WindowXML):
 
     # player callbacks (other thread)
     def on_av_started(self):
-        if self.closing or not self.playing_ours():
+        source = self.playing_source()
+        if self.closing or source is None:
             return
         tok = self.play_token
         self.av_started_token = tok
         try:
-            self.progress.release(keep=self.player.getPlayingFile())   # the file before this one
+            self.progress.release(keep=source)   # the file before this one
         except Exception:
             pass
         try:
-            path = self.player.getPlayingFile()
             total = self.player.getTotalTime()
             if total:
-                library.durations().learn(path, total)
+                library.durations().learn(source, total)
         except Exception:
             pass
 
@@ -775,6 +787,7 @@ class TVWindow(xbmcgui.WindowXML):
             self.our_files.add(f)
         self.play_token += 1
         self.play_started_at = time.time()
+        self.requested_path = ""
         self.player.play(pl, windowed=True)
 
     # ----------------------------------------------------------- dialogs

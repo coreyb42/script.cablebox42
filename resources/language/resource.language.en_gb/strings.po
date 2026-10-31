@@ -85,7 +85,7 @@ msgid "Weather data from"
 msgstr ""
 
 msgctxt "#32022"
-msgid "City or lat,lon (for Open-Meteo)"
+msgid "City, US ZIP code or lat,lon (for Open-Meteo)"
 msgstr ""
 
 msgctxt "#32023"

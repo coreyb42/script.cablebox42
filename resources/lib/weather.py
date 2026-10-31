@@ -3,7 +3,8 @@ weather crawl.
 
 Data comes from (in order, configurable in Settings):
   * Kodi's own weather service (Settings > Services > Weather), or
-  * Open-Meteo (free, no API key) for a city / "lat,lon" you type in.
+  * Open-Meteo (free, no API key) for a city, US ZIP or "lat,lon" you type in.
+    US ZIP coordinates are resolved with Zippopotam.us (also no API key).
 """
 import json
 import os
@@ -150,13 +151,14 @@ def _save_cache(c):
 
 def remember(d):
     c = _cache()
-    c["last"] = {"at": time.time(), "data": d}
+    c["last"] = {"at": time.time(), "data": d, "lookup": _lookup_key()}
     _save_cache(c)
 
 
 def last_good(max_age=STALE_OK):
     hit = _cache().get("last") or {}
-    if hit.get("data") and time.time() - float(hit.get("at") or 0) < max_age:
+    if (hit.get("lookup") == _lookup_key() and hit.get("data")
+            and time.time() - float(hit.get("at") or 0) < max_age):
         return hit["data"]
     return None
 
@@ -184,32 +186,45 @@ def kodi_place():
 
 def _geocode(place):
     st = _cache()
-    cache = st.get("geocode", {})
+    # v1 silently selected the wrong city for state abbreviations such as NC.
+    cache = st.get("geocode_v2", {})
     if place in cache:
         return cache[place]
     parts = [p.strip() for p in place.split(",")]
     try:
         if len(parts) == 2 and all(p.replace(".", "").lstrip("-").isdigit() for p in parts):
             hit = {"lat": float(parts[0]), "lon": float(parts[1]), "name": place}
+        elif re.fullmatch(r"[0-9]{5}", place):
+            # Open-Meteo does not index every US ZIP (including 27527).
+            res = _get_json("https://api.zippopotam.us/us/%s" % place)
+            if res.get("post code") != place or res.get("country abbreviation") != "US":
+                return None
+            r = (res.get("places") or [])[0]
+            hit = {"lat": float(r["latitude"]), "lon": float(r["longitude"]),
+                   "name": "%s, %s %s" % (r["place name"], r["state abbreviation"], place)}
         else:
             res = _get_json("https://geocoding-api.open-meteo.com/v1/search?count=5&language=en&name=%s"
-                            % quote(parts[0]))
+                            % quote(place))
             results = res.get("results") or []
-            if len(parts) > 1:  # "Springfield, IL" -> prefer matching admin/country
-                want = parts[1].lower()
-                results = [r for r in results if want in (r.get("admin1", "") + r.get("country_code", "") +
-                                                          r.get("country", "")).lower()] or results
             if not results:
                 return None
             r = results[0]
-            hit = {"lat": r["latitude"], "lon": r["longitude"], "name": r.get("name", place)}
+            name = ", ".join(x for x in (r.get("name", place), r.get("admin1")) if x)
+            hit = {"lat": r["latitude"], "lon": r["longitude"], "name": name}
+        if not (-90 <= hit["lat"] <= 90 and -180 <= hit["lon"] <= 180):
+            return None
     except Exception as exc:
         K.log_err("geocode failed: %s" % exc)
         return None
     st = _cache()
-    st.setdefault("geocode", {})[place] = hit
+    st.setdefault("geocode_v2", {})[place] = hit
     _save_cache(st)
     return hit
+
+
+def _lookup_key():
+    return [K.setting("weather_location", "").strip() or kodi_place(),
+            K.setting_int("weather_source", 0), fahrenheit()]
 
 
 def from_open_meteo(place):

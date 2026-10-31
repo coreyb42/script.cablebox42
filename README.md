@@ -1,5 +1,11 @@
 # CableBox 42
 
+Fork development: see [our development guide](docs/development.md) and
+[Jellyfin integration plan](docs/plans/jellyfin-development.md). This branch
+adds Jellyfin playback compatibility; channel viewing currently updates
+Jellyfin watch history. It also fixes city/state weather lookup and accepts
+US ZIP codes, such as `27527`.
+
 **Retro cable TV from your own Kodi library. Flip channels, not menus.**
 
 > **New:** CableBox 42 1.0.0 is the first official release. It's tested on
